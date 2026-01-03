@@ -1,0 +1,214 @@
+# vLLM + LMCache Multi-Stage Dockerfile
+# + Docker cache
+# + Ccache
+# + uv cache
+# Version: 2026-01-03
+# Build:   TMPDIR=vllm-dockercache podman build -v ./vllm-ccache:/root/.ccache -t vllm-202601-cu129 -f vllm-lmcache-Dockerfile
+
+#################### ARGUMENTS ####################
+ARG CUDA_VERSION=12.9.1
+ARG LMCACHE_GIT_REF=dev
+ARG VLLM_GIT_REF=main
+ARG FLASHINFER_VERSION=0.5.3
+ARG WHEELS_DIR=/tmp/wheels
+
+#################### BUILD STAGE ####################
+# Full build environment with all development tools
+FROM nvcr.io/nvidia/cuda:${CUDA_VERSION}-devel-ubuntu24.04 AS build
+
+ARG CUDA_VERSION
+ARG LMCACHE_GIT_REF
+ARG VLLM_GIT_REF
+ARG WHEELS_DIR
+
+# Build environment
+ENV CUDA_VERSION=${CUDA_VERSION}
+ENV WHEELS_DIR=${WHEELS_DIR}
+
+# Build config
+ENV UV_LINK_MODE=copy
+ENV UV_HTTP_TIMEOUT=500
+ENV UV_INDEX_STRATEGY="unsafe-best-match"
+ENV MAX_JOBS=128
+ENV NVCC_THREADS=8
+ENV CMAKE_BUILD_TYPE=Release
+ENV USE_CUDA=1
+ENV CCACHE_DIR=/root/.ccache
+ENV CUDA_HOME=/usr/local/cuda
+ENV NVCC_GENCODE="-gencode=arch=compute_120,code=sm_120"
+ENV TORCH_CUDA_ARCH_LIST='12.0'
+ENV FLASH_ATTN_CUDA_ARCHS=120
+ENV VLLM_FLASH_ATTN_VERSION=2
+# Note: flashinfer is now installed as pre-compiled wheel in runtime
+# ENV FLASHINFER_ENABLE_AOT=1
+ENV VLLM_TARGET_DEVICE=cuda
+ENV LMCACHE_NVCC_THREADS=8
+ENV LMCACHE_MAX_JOBS=32
+ENV LMCACHE_CUDA_VERSION=${CUDA_VERSION}
+ENV LMCACHE_CUDA_ARCHS=12.0
+ENV LMCACHE_TORCH_CUDA_ARCH_LIST=12.0
+ENV LMCACHE_VLLM_FA_CMAKE_GPU_ARCHES=120
+ENV VLLM_DOCKER_BUILD_CONTEXT=1
+ENV PATH="/opt/venv/bin:$PATH"
+
+# System packages
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
+    ca-certificates \
+    python3.12 \
+    python3.12-venv \
+    python3.12-dev \
+    python3-pip \
+    git \
+    ccache \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create venv
+RUN python3 -m venv /opt/venv
+RUN /opt/venv/bin/pip install --no-cache-dir --upgrade pip
+RUN /opt/venv/bin/pip install --no-cache-dir uv
+
+# Create wheel output directory
+RUN mkdir -p ${WHEELS_DIR}
+
+# Build tools
+RUN --mount=type=cache,target=/root/.cache/uv \
+    /opt/venv/bin/uv pip install ninja setuptools setuptools_scm
+
+# App
+# ---------------------------------------------------------------
+# PyTorch
+RUN --mount=type=cache,target=/root/.cache/uv \
+    /opt/venv/bin/uv pip install --pre torch>=2.9.0 torchvision torchaudio \
+    --extra-index-url https://download.pytorch.org/whl/cu${CUDA_VERSION%.*}
+
+# Note: vLLM includes triton_kernels, so no separate triton build needed
+# Note: flashinfer is installed in the runtime stage from pre-built wheels
+
+
+
+# Clone vLLM
+WORKDIR /workspace
+RUN git clone --branch ${VLLM_GIT_REF} https://github.com/vllm-project/vllm
+
+# vLLM: Specialize for SM120 (RTX 5090, RTX Pro 6000) to save hours of compilation time
+WORKDIR /workspace/vllm
+RUN sed -i 's/ALLSPARK_ARCHS "8.0;8.6;8.7;8.9"/ALLSPARK_ARCHS "12.0"/g' CMakeLists.txt
+RUN sed -i 's/MARLIN_ARCHS "8.0+PTX"/MARLIN_ARCHS "12.0"/g' CMakeLists.txt
+RUN sed -i 's/MARLIN_FP8_ARCHS "8.9;12.0"/MARLIN_FP8_ARCHS "12.0"/g' CMakeLists.txt
+RUN sed -i 's/MARLIN_OTHER_ARCHS "7.5;8.0+PTX"/MARLIN_OTHER_ARCHS "12.0"/g' CMakeLists.txt
+RUN sed -i 's/MARLIN_MOE_ARCHS "8.0+PTX"/MARLIN_MOE_ARCHS "12.0"/g' CMakeLists.txt
+RUN sed -i 's/MARLIN_MOE_FP8_ARCHS "8.9;12.0"/MARLIN_MOE_FP8_ARCHS "12.0"/g' CMakeLists.txt
+RUN sed -i 's/MARLIN_MOE_OTHER_ARCHS "7.5;8.0+PTX"/MARLIN_MOE_OTHER_ARCHS "12.0"/g' CMakeLists.txt
+RUN sed -i 's/HADACORE_ARCHS "8.0+PTX;9.0+PTX" "${CUDA_ARCHS}"/HADACORE_ARCHS "12.0" "${CUDA_ARCHS}"/g' CMakeLists.txt
+RUN sed -i 's/"7.5;8.0;8.7;8.9+PTX" "${CUDA_ARCHS}"/"12.0" "${CUDA_ARCHS}"/g' CMakeLists.txt
+
+# vLLM build requirements
+RUN --mount=type=cache,target=/root/.cache/uv \
+    /opt/venv/bin/uv pip install -r requirements/build.txt \
+    --extra-index-url https://download.pytorch.org/whl/cu${CUDA_VERSION%.*}
+
+# Build vLLM wheel
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=cache,target=/root/.ccache \
+    CCACHE_NOHASHDIR="true" \
+    /opt/venv/bin/python3 setup.py bdist_wheel --dist-dir ${WHEELS_DIR} \
+    | grep -vE "^copying|^creating|^writing|^adding"
+
+# Clone LMCache
+WORKDIR /workspace
+RUN git clone --branch ${LMCACHE_GIT_REF} https://github.com/LMCache/LMCache
+
+# Build LMCache wheel
+WORKDIR /workspace/LMCache
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=cache,target=/root/.ccache \
+    CCACHE_NOHASHDIR="true" \
+    /opt/venv/bin/python3 setup.py bdist_wheel --dist-dir ${WHEELS_DIR} \
+    | grep -vE "^copying|^creating|^writing|^adding"
+
+# ccache stats
+WORKDIR /workspace
+RUN --mount=type=cache,target=/root/.ccache,sharing=locked \
+    ccache -s
+
+#################### RUNTIME STAGE ####################
+# Lean production image without build tools
+FROM nvcr.io/nvidia/cuda:${CUDA_VERSION}-runtime-ubuntu24.04 AS runtime
+
+ARG CUDA_VERSION
+ARG FLASHINFER_VERSION
+ARG WHEELS_DIR
+
+ENV UV_LINK_MODE=copy
+ENV UV_HTTP_TIMEOUT=500
+ENV UV_INDEX_STRATEGY="unsafe-best-match"
+ENV CUDA_VERSION=${CUDA_VERSION}
+ENV FLASHINFER_VERSION=${FLASHINFER_VERSION}
+ENV FLASHINFER_CUDA_ARCH_LIST="12.0"
+ENV WHEELS_DIR=${WHEELS_DIR}
+ENV DEBIAN_FRONTEND=noninteractive
+ENV VLLM_TARGET_DEVICE=cuda
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Runtime packages
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    kmod \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install CUDA development tools for runtime JIT compilation
+# (FlashInfer, DeepGEMM, EP kernels all require compilation at runtime)
+RUN CUDA_VERSION_DASH=$(echo ${CUDA_VERSION} | cut -d. -f1,2 | tr '.' '-') && \
+    apt-get update -y && \
+    apt-get install -y --no-install-recommends \
+    build-essential \
+    cuda-nvcc-${CUDA_VERSION_DASH}
+
+# Python
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.12 \
+    python3.12-venv \
+    python3.12-dev \
+    python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create venv
+RUN python3 -m venv /opt/venv
+RUN /opt/venv/bin/pip install --no-cache-dir --upgrade pip
+RUN /opt/venv/bin/pip install --no-cache-dir uv
+
+# Install packages
+WORKDIR /tmp
+
+# PyTorch (use uv cache for fast install)
+RUN --mount=type=cache,target=/root/.cache/uv \
+    /opt/venv/bin/uv pip install --pre torch>=2.9.0 torchvision torchaudio \
+    --extra-index-url https://download.pytorch.org/whl/cu${CUDA_VERSION%.*}
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    /opt/venv/bin/uv pip install torch-c-dlpack-ext \
+    --extra-index-url https://download.pytorch.org/whl/cu${CUDA_VERSION%.*}
+
+# Copy all wheels from build stage and install them
+COPY --from=build ${WHEELS_DIR} /tmp/wheels
+RUN sh -c 'for f in /tmp/wheels/*.whl; do [ -f "$f" ] && /opt/venv/bin/uv pip install "$f"; done'
+
+# Clean up
+RUN rm -rf /tmp/wheels
+
+# Install FlashInfer pre-compiled kernel cache and binaries
+# https://docs.flashinfer.ai/installation.html
+RUN --mount=type=cache,target=/root/.cache/uv \
+    /opt/venv/bin/uv pip install flashinfer-python flashinfer-cubin==${FLASHINFER_VERSION} \
+    && /opt/venv/bin/uv pip install flashinfer-jit-cache==${FLASHINFER_VERSION} \
+    --extra-index-url https://flashinfer.ai/whl/cu$(echo $CUDA_VERSION | cut -d. -f1,2 | tr -d '.') \
+    && /opt/venv/bin/flashinfer show-config
+
+WORKDIR /workspace
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
+    CMD python3 -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)" 2>/dev/null || exit 1
+
+CMD ["bash"]
