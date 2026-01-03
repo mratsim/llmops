@@ -83,26 +83,23 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     /opt/venv/bin/uv pip install --pre torch>=2.9.0 torchvision torchaudio \
     --extra-index-url https://download.pytorch.org/whl/cu${CUDA_VERSION%.*}
 
-# Note: vLLM includes triton_kernels, so no separate triton build needed
-# Note: flashinfer is installed in the runtime stage from pre-built wheels
-
-
-
 # Clone vLLM
 WORKDIR /workspace
 RUN git clone --branch ${VLLM_GIT_REF} https://github.com/vllm-project/vllm
 
 # vLLM: Specialize for SM120 (RTX 5090, RTX Pro 6000) to save hours of compilation time
 WORKDIR /workspace/vllm
-RUN sed -i 's/ALLSPARK_ARCHS "8.0;8.6;8.7;8.9"/ALLSPARK_ARCHS "12.0"/g' CMakeLists.txt
-RUN sed -i 's/MARLIN_ARCHS "8.0+PTX"/MARLIN_ARCHS "12.0"/g' CMakeLists.txt
-RUN sed -i 's/MARLIN_FP8_ARCHS "8.9;12.0"/MARLIN_FP8_ARCHS "12.0"/g' CMakeLists.txt
-RUN sed -i 's/MARLIN_OTHER_ARCHS "7.5;8.0+PTX"/MARLIN_OTHER_ARCHS "12.0"/g' CMakeLists.txt
-RUN sed -i 's/MARLIN_MOE_ARCHS "8.0+PTX"/MARLIN_MOE_ARCHS "12.0"/g' CMakeLists.txt
-RUN sed -i 's/MARLIN_MOE_FP8_ARCHS "8.9;12.0"/MARLIN_MOE_FP8_ARCHS "12.0"/g' CMakeLists.txt
-RUN sed -i 's/MARLIN_MOE_OTHER_ARCHS "7.5;8.0+PTX"/MARLIN_MOE_OTHER_ARCHS "12.0"/g' CMakeLists.txt
-RUN sed -i 's/HADACORE_ARCHS "8.0+PTX;9.0+PTX" "${CUDA_ARCHS}"/HADACORE_ARCHS "12.0" "${CUDA_ARCHS}"/g' CMakeLists.txt
-RUN sed -i 's/"7.5;8.0;8.7;8.9+PTX" "${CUDA_ARCHS}"/"12.0" "${CUDA_ARCHS}"/g' CMakeLists.txt
+RUN sed -i \
+    -e 's/ALLSPARK_ARCHS "8.0;8.6;8.7;8.9"/ALLSPARK_ARCHS "12.0"/g' \
+    -e 's/MARLIN_ARCHS "8.0+PTX"/MARLIN_ARCHS "12.0"/g' \
+    -e 's/MARLIN_FP8_ARCHS "8.9;12.0"/MARLIN_FP8_ARCHS "12.0"/g' \
+    -e 's/MARLIN_OTHER_ARCHS "7.5;8.0+PTX"/MARLIN_OTHER_ARCHS "12.0"/g' \
+    -e 's/MARLIN_MOE_ARCHS "8.0+PTX"/MARLIN_MOE_ARCHS "12.0"/g' \
+    -e 's/MARLIN_MOE_FP8_ARCHS "8.9;12.0"/MARLIN_MOE_FP8_ARCHS "12.0"/g' \
+    -e 's/MARLIN_MOE_OTHER_ARCHS "7.5;8.0+PTX"/MARLIN_MOE_OTHER_ARCHS "12.0"/g' \
+    -e 's/HADACORE_ARCHS "8.0+PTX;9.0+PTX" "${CUDA_ARCHS}"/HADACORE_ARCHS "12.0" "${CUDA_ARCHS}"/g' \
+    -e 's/"7.5;8.0;8.7;8.9+PTX" "${CUDA_ARCHS}"/"12.0" "${CUDA_ARCHS}"/g' \
+    CMakeLists.txt
 
 # vLLM build requirements
 RUN --mount=type=cache,target=/root/.cache/uv \
@@ -152,21 +149,17 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV VLLM_TARGET_DEVICE=cuda
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Runtime packages
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    kmod \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install CUDA development tools for runtime JIT compilation
-# (FlashInfer, DeepGEMM, EP kernels all require compilation at runtime)
+# Distro setup
 RUN CUDA_VERSION_DASH=$(echo ${CUDA_VERSION} | cut -d. -f1,2 | tr '.' '-') && \
     apt-get update -y && \
     apt-get install -y --no-install-recommends \
+    # Runtime packages
+    kmod \
+    # Install CUDA development tools for runtime JIT compilation
+    # (FlashInfer, DeepGEMM, EP kernels all require compilation at runtime)
     build-essential \
-    cuda-nvcc-${CUDA_VERSION_DASH}
-
-# Python
-RUN apt-get update && apt-get install -y --no-install-recommends \
+    cuda-nvcc-${CUDA_VERSION_DASH} \
+    # Python
     python3.12 \
     python3.12-venv \
     python3.12-dev \
@@ -178,7 +171,7 @@ RUN python3 -m venv /opt/venv
 RUN /opt/venv/bin/pip install --no-cache-dir --upgrade pip
 RUN /opt/venv/bin/pip install --no-cache-dir uv
 
-# Install packages
+# Install packages in venv
 WORKDIR /tmp
 
 # PyTorch (use uv cache for fast install)
@@ -190,9 +183,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     /opt/venv/bin/uv pip install torch-c-dlpack-ext \
     --extra-index-url https://download.pytorch.org/whl/cu${CUDA_VERSION%.*}
 
-# Copy all wheels from build stage and install them
+# Copy all wheels from build stage & install them
 COPY --from=build ${WHEELS_DIR} /tmp/wheels
-RUN sh -c 'for f in /tmp/wheels/*.whl; do [ -f "$f" ] && /opt/venv/bin/uv pip install "$f"; done'
+RUN /opt/venv/bin/uv pip install /tmp/wheels/*.whl
 
 # Clean up
 RUN rm -rf /tmp/wheels
@@ -206,9 +199,5 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     && /opt/venv/bin/flashinfer show-config
 
 WORKDIR /workspace
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
-    CMD python3 -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)" 2>/dev/null || exit 1
 
 CMD ["bash"]
