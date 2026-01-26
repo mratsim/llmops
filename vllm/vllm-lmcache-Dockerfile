@@ -9,7 +9,7 @@
 ARG CUDA_VERSION=12.9.1
 ARG LMCACHE_GIT_REF=dev
 ARG VLLM_GIT_REF=main
-ARG FLASHINFER_VERSION=0.5.3
+ARG FLASHINFER_VERSION=0.6.1
 ARG WHEELS_DIR=/tmp/wheels
 
 #################### BUILD STAGE ####################
@@ -197,6 +197,18 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     && /opt/venv/bin/uv pip install flashinfer-jit-cache==${FLASHINFER_VERSION} \
     --extra-index-url https://flashinfer.ai/whl/cu$(echo $CUDA_VERSION | cut -d. -f1,2 | tr -d '.') \
     && /opt/venv/bin/flashinfer show-config
+
+# Allow z.ai GLM-4.6V and GLM-4.7-Flash models
+RUN --mount=type=cache,target=/root/.cache/uv \
+    apt-get update -y && \
+    apt-get install -y --no-install-recommends git && \
+    /opt/venv/bin/uv pip install git+https://github.com/huggingface/transformers.git && \
+    apt-get purge -y --auto-remove git && rm -rf /var/lib/apt/lists/*
+
+# TODO: Unsure why this is needed - remove it ASAP. Pulled by OpenCV for vLLM image processing
+RUN apt-get update -y && \
+    apt-get install -y --no-install-recommends libxcb1 \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /workspace
 
