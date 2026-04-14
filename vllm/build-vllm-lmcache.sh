@@ -7,7 +7,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-IMAGE_TAG=vllm-202601-cu129
+IMAGE_TAG=vllm-202604-cu129
 UVCACHE_DIR=$SCRIPT_DIR/"vllm-uvcache"
 CCACHE_DIR=$SCRIPT_DIR/"vllm-ccache"
 TMPDIR=$SCRIPT_DIR/"vllm-dockercache"
