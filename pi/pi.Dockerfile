@@ -28,7 +28,9 @@ RUN apk add --no-cache \
         # Neovim editor for manual edits
         neovim \
         # File type identification
-        file
+        file \
+        # GitHub CLI for repo operations
+        gh
 
         # Modern compression utility
         # zstd
