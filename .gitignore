@@ -1,4 +1,4 @@
 # Cache
-vllm-dockercache/
-vllm-ccache/
-vllm-uvcache/
+vllm-dockercache
+vllm-ccache
+vllm-uvcache

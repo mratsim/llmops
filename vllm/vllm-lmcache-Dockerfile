@@ -2,7 +2,7 @@
 # + Docker cache
 # + Ccache
 # + uv cache
-# Version: 2026-01-03
+# Version: 2026-04-06
 # Build:   TMPDIR=vllm-dockercache podman build -v ./vllm-ccache:/root/.ccache -t vllm-202601-cu129 -f vllm-lmcache-Dockerfile
 
 #################### ARGUMENTS ####################
