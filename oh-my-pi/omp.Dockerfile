@@ -1,4 +1,4 @@
-FROM cgr.dev/chainguard/node:latest-dev@sha256:7fe7081cf5939f78dfc281b05d64b1ad0e26eb2e3213676a250fa361b6928034
+FROM cgr.dev/chainguard/node:latest-dev
 
 USER root
 RUN apk add --no-cache \

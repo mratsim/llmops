@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ~/bin/pi - Run oh-my-pi in a sandboxed container
+# ~/.local/bin/omp - Run oh-my-pi in a sandboxed container
 set -euo pipefail
 
 POD_NAME="oh-my-pi"
@@ -137,6 +137,6 @@ podman run --replace --rm \
     --env "COLORTERM=${COLORTERM:-truecolor}" \
     "${PI_IMAGE}" "$@"
 
-    # idmap mount fail due o some permission issue
+    # idmap mount fail due to some permission issue
     # --mount type=bind,src="${PI_AGENT_DIR}",target=/omp-agent,idmap="uids=1000-${uid}-1;gids=1000-${gid}-1" \
     # --mount type=bind,src="$(pwd)",target="$(pwd)",idmap="uids=1000-${uid}-1;gids=1000-${gid}-1" \
