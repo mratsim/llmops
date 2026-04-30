@@ -13,6 +13,8 @@ RUN apk add --no-cache \
         # File search & code search (reduces supply chain risk vs runtime install)
         fd \
         ripgrep \
+        # Text processing
+        perl \
         # JSON processing for APIs, configs, and session files
         jq \
         # Syntax-highlighted cat alternative for code viewing
@@ -154,6 +156,10 @@ RUN mkdir -p /root/.local/bin && \
 ENV PATH="/usr/local/share/mise/shims:/root/.local/bin:/root/.cargo/bin:/root/.nimble/bin:/root/go/bin:/root/.bun/bin:${PATH}"
 ENV HOME=/root
 ENV MISE_CONFIG_FILE=/usr/local/share/mise/config.toml
+
+# Install data processing tools
+RUN cargo install qsv xan --locked
+RUN uv pip install polars pandas
 
 WORKDIR /app
 

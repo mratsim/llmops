@@ -5,8 +5,10 @@ set -euo pipefail
 POD_NAME="pi"
 PI_IMAGE="pi-202604:latest"
 PI_AGENT_DIR="${HOME}/.pi/agent"
+GLOBAL_NODE_CACHE="${HOME}/.pi/global_node_modules"
 
 mkdir -p "${PI_AGENT_DIR}"
+mkdir -p "${GLOBAL_NODE_CACHE}"
 
 # Write models.yml (always overwrite)
 cat > "${PI_AGENT_DIR}/models.json" << 'EOFMODELS'
@@ -62,6 +64,10 @@ cat > "${PI_AGENT_DIR}/models.json" << 'EOFMODELS'
       "baseUrl": "http://host.containers.internal:2000/v1",
       "api": "openai-completions",
       "apiKey": "none",
+      "compat": {
+        "supportsDeveloperRole": false,
+        "supportsReasoningEffort": false
+      },
       "models": [
         {
           "id": "MiniMax-M2.5",
@@ -76,17 +82,10 @@ cat > "${PI_AGENT_DIR}/models.json" << 'EOFMODELS'
           },
           "contextWindow": 196608,
           "maxTokens": 131072
-        }
-      ]
-    },
-    "vllm": {
-      "baseUrl": "http://host.containers.internal:2000/v1",
-      "api": "openai-completions",
-      "apiKey": "none",
-      "models": [
+        },
         {
           "id": "Qwen3.6-35B-A3B",
-          "name": "Qwen3.6-35B-A3B (vLLM)",
+          "name": "Qwen3.6-35B-A3B (SGLang)",
           "reasoning": true,
           "input": ["text", "image"],
           "cost": {
@@ -100,7 +99,7 @@ cat > "${PI_AGENT_DIR}/models.json" << 'EOFMODELS'
         },
         {
           "id": "Qwen3.6-27B",
-          "name": "Qwen3.6-27B (vLLM)",
+          "name": "Qwen3.6-27B (SGLang)",
           "reasoning": true,
           "input": ["text", "image"],
           "cost": {
@@ -111,7 +110,18 @@ cat > "${PI_AGENT_DIR}/models.json" << 'EOFMODELS'
           },
           "contextWindow": 262144,
           "maxTokens": 81920
-        },
+        }
+      ]
+    },
+    "vllm": {
+      "baseUrl": "http://host.containers.internal:2000/v1",
+      "api": "openai-completions",
+      "apiKey": "none",
+      "compat": {
+        "supportsDeveloperRole": false,
+        "supportsReasoningEffort": false
+      },
+      "models": [
         {
           "id": "Nemotron-3-Super",
           "name": "Nemotron-3-Super (vLLM)",
@@ -158,6 +168,7 @@ podman run --replace --rm \
     --uts=private \
     --volume "$(pwd):$(pwd)" \
     --volume "${PI_AGENT_DIR}:/pi-agent" \
+    --volume "${GLOBAL_NODE_CACHE}:/usr/local/lib/node_modules" \
     --env PI_STREAM_FIRST_EVENT_TIMEOUT_MS=600000 \
     --env PI_CODING_AGENT_DIR=/pi-agent \
     --workdir "$(pwd)" \
