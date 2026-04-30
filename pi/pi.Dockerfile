@@ -133,8 +133,10 @@ RUN ln -s /usr/local/share/mise/shims/bun /usr/local/bin/bun \
     && ln -s /usr/local/share/mise/shims/uv /usr/local/bin/uv \
     && ln -s /usr/local/share/mise/shims/uvx /usr/local/bin/uvx
 
-RUN uv python install 3.14.4 \
-    && ln -s "$(uv python find 3.14.4)" /usr/local/bin/python3
+RUN mise exec uv -- uv python install 3.14.4 \
+    && ln -s "$(mise exec uv -- uv python find 3.14.4)" /usr/local/bin/python3 \
+    && uv venv /opt/venv \
+    && ln -sf /opt/venv/bin/python3 /usr/local/bin/python3
 
 RUN cat > /usr/local/share/mise/config.toml << 'EOF'
 [tools]
@@ -153,13 +155,14 @@ RUN mkdir -p /root/.local/bin && \
     mise exec bun -- bun install -g @mariozechner/pi-coding-agent && \
     ln -sf /root/.bun/bin/pi /root/.local/bin/pi
 
-ENV PATH="/usr/local/share/mise/shims:/root/.local/bin:/root/.cargo/bin:/root/.nimble/bin:/root/go/bin:/root/.bun/bin:${PATH}"
+ENV PATH="/opt/venv/bin:/usr/local/share/mise/shims:/root/.local/bin:/root/.cargo/bin:/root/.nimble/bin:/root/go/bin:/root/.bun/bin:${PATH}"
 ENV HOME=/root
 ENV MISE_CONFIG_FILE=/usr/local/share/mise/config.toml
 
 # Install data processing tools
-RUN cargo install qsv xan --locked
-RUN uv pip install polars pandas
+RUN mise exec rust -- cargo install qsv xan --locked
+RUN mise exec bun -- bun install -g @mermaid-js/mermaid-cli
+RUN uv pip install --no-cache-dir polars pandas
 
 WORKDIR /app
 
