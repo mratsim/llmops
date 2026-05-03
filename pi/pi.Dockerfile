@@ -10,6 +10,8 @@ RUN apk add --no-cache \
         gcc \
         clang \
         make \
+        # Default busybox grep doesn't support --include=*.file_ext and keeps tripping LLM Agent
+        grep \
         # File search & code search (reduces supply chain risk vs runtime install)
         fd \
         ripgrep \

@@ -3,7 +3,7 @@
 set -euo pipefail
 
 POD_NAME="pi"
-PI_IMAGE="pi-202604:latest"
+PI_IMAGE="pi-202605:latest"
 PI_AGENT_DIR="${HOME}/.pi/agent"
 GLOBAL_NODE_CACHE="${HOME}/.pi/global_node_modules"
 
@@ -34,7 +34,7 @@ cat > "${PI_AGENT_DIR}/models.json" << 'EOFMODELS'
             "cacheRead": 0,
             "cacheWrite": 0
           },
-          "contextWindow": 524288,
+          "contextWindow": 262144,
           "maxTokens": 81920
         }
       ]
